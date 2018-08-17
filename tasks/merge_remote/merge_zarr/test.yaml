@@ -1,6 +1,6 @@
 # Whether the files are accessed locally or remotely. Valid values are local or
 # remote
-file_location: local
+file_location: remote
 sources:
   - GSE84465_split
 formats:
