@@ -2,6 +2,7 @@ import tempfile
 import os
 
 import anndata
+import fastparquet
 import h5py
 import h5sparse
 import loompy
@@ -111,11 +112,14 @@ def convert_to_loom(df):
                   {"gene_name": df.columns.values})
     return path
 
-def convert_to_parquet(df):
+def convert_to_parquet(df, row_group_offsets, compression, file_scheme):
     """Convert a dataframe of expression values to a parquet file."""
 
     path = _get_temp_path(".parquet")
-    df.to_parquet(path, "pyarrow")
+    qcs = fake_qc_values(NUM_QC_VALUES, df.index, seed=df.values.sum())
+    full_df = pandas.concat([df, qcs], axis=1)
+    fastparquet.write(path, full_df, row_group_offsets=row_group_offsets,
+                      compression=compression, file_scheme=file_scheme)
 
     return path
 
