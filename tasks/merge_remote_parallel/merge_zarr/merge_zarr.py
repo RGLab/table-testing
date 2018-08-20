@@ -8,7 +8,8 @@ import zarr
 
 def merge_zarrs(zarr_paths, output_path):
 
-    delayed_arrays_to_merge = [dask.delayed(dask.array.from_zarr)(fn, storage_options={"anon": True}) for fn in fns]
+    delayed_arrays_to_merge = [dask.delayed(dask.array.from_zarr)(fn, storage_options={"anon": True})
+                               for fn in zarr_paths]
     delayed_merged_array = dask.delayed(dask.array.concatenate)(delayed_arrays_to_merge, axis=1)
     written_array = dask.delayed(dask.array.to_zarr)(delayed_merged_array, output_path)
     written_array.compute()
