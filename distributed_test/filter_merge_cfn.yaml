@@ -74,6 +74,10 @@ Resources:
               - s3:GetObject
             Resource:
               - !Join ["/", [ !GetAtt ResultBucket.Arn, "*" ] ]
+          - Effect: Allow
+            Action:
+              - s3:ListAllMyBuckets
+            Resource: "*"
           # Invoke the other lambdas
           - Effect: Allow
             Action:

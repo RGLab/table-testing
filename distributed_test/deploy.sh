@@ -8,7 +8,7 @@ AWS="aws"
 
 rm -f filter_merge_lambda.zip
 # These are huge, like 65MB :(
-pip3 install --system -t filter_merge_lambda pyarrow fastparquet s3fs
+pip3 install --system -t filter_merge_lambda pyarrow fastparquet s3fs zarr pandas
 cd filter_merge_lambda && zip -X -r ../filter_merge_lambda.zip * && cd ..
 $AWS s3 cp filter_merge_lambda.zip s3://"$2"/filter_merge_lambda.zip
 
