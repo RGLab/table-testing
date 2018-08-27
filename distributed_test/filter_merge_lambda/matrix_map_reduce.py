@@ -41,22 +41,17 @@ will call:
 manage global state, which.....works?)
 """
 
-import concurrent.futures
+import datetime
 import json
 import os
 import uuid
 
-import botocore
 import boto3
+from aws_xray_sdk.core import xray_recorder
+from aws_xray_sdk.core import patch
+patch(["boto3"])
 
-#import fastparquet
-#import numcodecs
-#import pyarrow
-#import pyarrow.parquet
-
-import s3fs
-import pandas
-import zarr
+import dynamo_utils
 
 # These are set in the cloudformation template
 CFN_VARS = {
@@ -64,23 +59,59 @@ CFN_VARS = {
     "work_fn": os.environ.get("WORK_FN"),
     "reducer_fn": os.environ.get("REDUCER_FN"),
     "state_table": os.environ.get("STATE_TABLE"),
+    "timing_table": os.environ.get("TIMING_TABLE"),
     "result_bucket": os.environ.get("RESULT_BUCKET")
 }
 
 # A couple convenient interfaces to aws
 LAMBDA_CLIENT = boto3.client("lambda", region_name="us-east-1")
 STATE_TABLE = boto3.resource("dynamodb", region_name="us-east-1").Table(CFN_VARS["state_table"])
+TIMING_TABLE = boto3.resource("dynamodb", region_name="us-east-1").Table(CFN_VARS["timing_table"])
 
-##############################################################################
-##############################################################################
-#    _                    _         _
-#   | |    __ _ _ __ ___ | |__   __| | __ _ ___
-#   | |   / _` | '_ ` _ \| '_ \ / _` |/ _` / __|
-#   | |__| (_| | | | | | | |_) | (_| | (_| \__ \
-#   |_____\__,_|_| |_| |_|_.__/ \__,_|\__,_|___/
-#
-##############################################################################
-##############################################################################
+# Record functions that handle different concerns for different formats here
+FORMAT_HANDLERS = {}
+try:
+    import parquet_impl
+    FORMAT_HANDLERS["parquet"] = {
+        "driver": parquet_impl.driver,
+        "mapper": parquet_impl.mapper,
+        "work": parquet_impl.work,
+        "reducer": parquet_impl.reducer
+    }
+except ImportError:
+    pass
+
+try:
+    import zarr_impl
+    FORMAT_HANDLERS["zarr"] = {
+        "driver": zarr_impl.driver,
+        "mapper": zarr_impl.mapper,
+        "work": zarr_impl.work,
+        "reducer": zarr_impl.reducer
+    }
+except ImportError:
+    pass
+
+
+def increment_state_field(request_id, field_name, increment_size):
+    """Increment a field in the state table.
+
+    This is used to keep track of how many lambda executions have completed and are
+    expected to complete.
+    """
+    return dynamo_utils.increment_field(
+        CFN_VARS["state_table"], {"RequestId": request_id}, field_name, increment_size)
+
+def record_timing_event(request_id, event_name):
+    """Record the time of an event."""
+    timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    TIMING_TABLE.update_item(
+        Key={"RequestId": request_id},
+        UpdateExpression=f"SET {event_name} = :t",
+        ExpressionAttributeValues={":t": timestamp}
+    )
+
+
 
 def driver(event, context):
     """Initiate the matrix filter and merge. Return quickly after kicking off
@@ -124,18 +155,21 @@ def driver(event, context):
     # Okay, let's go for it
     request_id = str(uuid.uuid4())
 
+    record_timing_event(request_id, "DriverStarted")
     # Record the request in the state table
     STATE_TABLE.put_item(
         Item={
-            "request_id": request_id,
-            "expected_work_executions": 0,
-            "completed_work_executions": 0,
-            "expected_mapper_executions": len(body["inputs"]),
-            "completed_mapper_executions": 0,
-            "expected_reducer_executions": 1,
-            "completed_reducer_executions": 0
+            "RequestId": request_id,
+            "ExpectedWorkExecutions": 0,
+            "CompletedWorkExecutions": 0,
+            "ExpectedMapperExecutions": len(body["inputs"]),
+            "CompletedMapperExecutions": 0,
+            "ExpectedReducerExecutions": 1,
+            "CompletedReducerExecutions": 0
         }
     )
+
+    # If we're working with zarr, initialize the output table for this request
 
     # Run mappers on each input
     for input_ in body["inputs"]:
@@ -153,7 +187,11 @@ def driver(event, context):
             Payload=json.dumps(mapper_payload).encode()
         )
 
+    format_driver_fn = FORMAT_HANDLERS[format_]["driver"]
+    format_driver_fn(request_id)
+
     # And return the request id to the caller
+    record_timing_event(request_id, "DriverComplete")
     return {
         "statusCode": "200",
         "body": json.dumps({"request_id": request_id})
@@ -164,9 +202,11 @@ def mapper(event, context):
     """Distribute work from one (bucket, prefix) pair to worker lambdas."""
 
     format_mapper_fn = FORMAT_HANDLERS[event["format"]]["mapper"]
+    print(f"Calling {format_mapper_fn.__name__}")
     work_chunk_specs = format_mapper_fn(event["request_id"], event["bucket"], event["prefix"])
+    print(f"work_chunk_specs {work_chunk_specs}")
 
-    increment_state_field(event["request_id"], "expected_work_executions", len(work_chunk_specs))
+    increment_state_field(event["request_id"], "ExpectedWorkExecutions", len(work_chunk_specs))
 
     for work_chunk_spec in work_chunk_specs:
         work_payload = {
@@ -181,9 +221,9 @@ def mapper(event, context):
             Payload=json.dumps(work_payload).encode()
         )
 
-    increment_state_field(event["request_id"], "completed_mapper_executions", 1)
+    increment_state_field(event["request_id"], "CompletedMapperExecutions", 1)
 
-def do_work(event, context):
+def work(event, context):
     """Filter one work chunk."""
 
     format_work_fn = FORMAT_HANDLERS[event["format"]]["work"]
@@ -192,21 +232,23 @@ def do_work(event, context):
 
     format_work_fn(event["request_id"], event["filter_string"], **work_chunk_spec)
 
-    increment_state_field(event["request_id"], "completed_work_executions", 1)
+    increment_state_field(event["request_id"], "CompletedWorkExecutions", 1)
 
     # Are we all done? Then run the reducer
     item = STATE_TABLE.get_item(
-        Key={"request_id": event["request_id"]},
+        Key={"RequestId": event["request_id"]},
         ConsistentRead=True
     )
 
-    done_mapping = (item["Item"]["expected_mapper_executions"] ==
-                    item["Item"]["completed_mapper_executions"])
+    done_mapping = (item["Item"]["ExpectedMapperExecutions"] ==
+                    item["Item"]["CompletedMapperExecutions"])
 
-    done_working = (item["Item"]["expected_work_executions"] ==
-                    item["Item"]["completed_work_executions"])
+    done_working = (item["Item"]["ExpectedWorkExecutions"] ==
+                    item["Item"]["CompletedWorkExecutions"])
 
     if done_mapping and done_working:
+
+        record_timing_event(event["request_id"], "WorkComplete")
         reducer_payload = {
             "request_id": event["request_id"],
             "format": event["format"]
@@ -222,214 +264,5 @@ def reducer(event, context):
 
     format_reducer_fn = FORMAT_HANDLERS[event["format"]]["reducer"]
     format_reducer_fn(event["request_id"])
-    increment_state_field(event["request_id"], "completed_reducer_executions", 1)
-
-##############################################################################
-##############################################################################
-#    _   _      _
-#   | | | | ___| |_ __   ___ _ __ ___
-#   | |_| |/ _ \ | '_ \ / _ \ '__/ __|
-#   |  _  |  __/ | |_) |  __/ |  \__ \
-#   |_| |_|\___|_| .__/ \___|_|  |___/
-#                |_|
-##############################################################################
-##############################################################################
-
-def increment_state_field(request_id, field_name, increment_size):
-    """Safely increment a count in the state table."""
-
-    while True:
-        item = STATE_TABLE.get_item(
-            Key={"request_id": request_id},
-            ConsistentRead=True
-        )
-        current_value = item["Item"][field_name]
-        new_value = current_value + increment_size
-        try:
-            STATE_TABLE.update_item(
-                Key={"request_id": request_id},
-                UpdateExpression=f"SET {field_name} = :n",
-                ConditionExpression=f"{field_name} = :c",
-                ExpressionAttributeValues={":n": new_value, ":c": current_value}
-            )
-        except botocore.exceptions.ClientError as exc:
-            print(exc)
-            continue
-        break
-
-##############################################################################
-##############################################################################
-#    ____                            _
-#   |  _ \ __ _ _ __ __ _ _   _  ___| |_
-#   | |_) / _` | '__/ _` | | | |/ _ \ __|
-#   |  __/ (_| | | | (_| | |_| |  __/ |_
-#   |_|   \__,_|_|  \__, |\__,_|\___|\__|
-#                      |_|
-##############################################################################
-##############################################################################
-# Parquet Simple
-# A parquet archive contained in a single file (with multiple row groups)
-##############################################################################
-
-def parquet_simple_mapper(request_id, bucket, prefix):
-
-    fs = s3fs.S3FileSystem(anon=True)
-    s3_url = f"s3://{bucket}/{prefix}"
-    pq = pyarrow.parquet.ParquetFile(fs.open(s3_url))
-
-    return [{"bucket": bucket, "prefix": prefix, "row_group": row_group}
-            for row_group in range(pq.num_row_groups)]
-
-def parquet_simple_work(request_id, filter_string, bucket, prefix, row_group):
-
-    fs = s3fs.S3FileSystem(anon=True)
-    s3_url = f"s3://{bucket}/{prefix}"
-    pq = pyarrow.parquet.ParquetFile(fs.open(s3_url))
-
-    table = pq.read_row_group(row_group)
-    matrix = table.to_pandas(zero_copy_only=True)
-
-    filtered_matrix = matrix[eval(filter_string)]
-
-    shard_id = str(uuid.uuid4())
-    result_bucket = CFN_VARS["result_bucket"]
-    dest_s3_url = f"s3://{result_bucket}/{request_id}/{shard_id}.parquet"
-    fs = s3fs.S3FileSystem(anon=False)
-    pyarrow.parquet.write_table(
-        pyarrow.Table.from_pandas(filtered_matrix),
-        fs.open(dest_s3_url, "wb"),
-        compression="BROTLI"
-    )
-
-
-def parquet_simple_reducer(request_id):
-
-    fs = s3fs.S3FileSystem()
-
-    result_bucket = CFN_VARS["result_bucket"]
-    s3_url = f's3://{result_bucket}/{request_id}'
-
-    shards = fs.ls(s3_url)
-    # This is the slowest step of the whole process...
-    fastparquet.writer.merge(shards, open_with=fs.open)
-
-##############################################################################
-##############################################################################
-#   ________      ___      .______      .______
-#  |       /     /   \     |   _  \     |   _  \
-#  `---/  /     /  ^  \    |  |_)  |    |  |_)  |
-#     /  /     /  /_\  \   |      /     |      /
-#    /  /----./  _____  \  |  |\  \----.|  |\  \----.
-#   /________/__/     \__\ | _| `._____|| _| `._____|
-#
-##############################################################################
-##############################################################################
-
-def _open_zarr(s3_path, anon=False, cache=False):
-    s3 = s3fs.S3FileSystem(anon=anon)
-    store = s3fs.S3Map(s3_path, s3=s3, check=False, create=False)
-    if cache:
-        lrucache = zarr.LRUStoreCache(store=store, max_size=1<<29)
-        root = zarr.group(store=lrucache)
-    else:
-        root = zarr.group(store=store)
-    return root
-
-def zarr_directory_mapper(request_id, bucket, prefix):
-
-    s3_path = f"{bucket}/{prefix}"
-    root = _open_zarr(s3_path, anon=True)
-    chunk_rows = root.data.chunks[0]
-    nchunks = root.data.nchunks
-    return [{"bucket": bucket, "prefix": prefix, "start_row": n*chunk_rows, "num_rows": chunk_rows}
-            for n in range(nchunks)]
-
-def zarr_directory_work(request_id, filter_string, bucket, prefix, start_row, num_rows):
-    
-    s3_path = f"{bucket}/{prefix}"
-    root = _open_zarr(s3_path, anon=True, cache=True)
-
-    end_row = start_row + num_rows
-    exp_df = pandas.DataFrame(data=root.data[start_row:end_row],
-                              index=root.cell_name[start_row:end_row],
-                              columns=root.gene_name)
-    qc_df = pandas.DataFrame(data=root.qc_values[start_row:end_row],
-                             index=root.cell_name[start_row:end_row],
-                             columns=root.qc_names)
-    matrix = pandas.concat([exp_df, qc_df], axis=1, copy=False)
-
-    filtered_matrix = matrix[eval(filter_string)]
-    filtered_data = filtered_matrix.iloc[:, :exp_df.shape[1]]
-    filtered_qcs = filtered_matrix.iloc[:, exp_df.shape[1]:]
-
-    shard_id = str(uuid.uuid4())
-    result_bucket = CFN_VARS["result_bucket"]
-    dest_s3_loc = f"s3://{result_bucket}/{request_id}/intermediate/{shard_id}.zarr"
-    out_root = _open_zarr(dest_s3_loc, anon=False)
-
-    out_root.create_dataset("data", data=filtered_data.values, chunks=filtered_data.shape)
-    out_root.create_dataset("qc_values", data=filtered_qcs.values, chunks=filtered_qcs.shape)
-    out_root.create_dataset("cell_name", data=filtered_matrix.index.tolist(),
-                            chunks=filtered_matrix.shape[0])
-    out_root.create_dataset("gene_name", data=exp_df.columns.tolist(),
-                            chunks=exp_df.shape[1])
-    out_root.create_dataset("qc_names", data=qc_df.columns.tolist(),
-                            chunks=qc_df.shape[1])
-
-def zarr_directory_reducer(request_id):
-
-    result_bucket = CFN_VARS["result_bucket"]
-    s3_path = f'{result_bucket}/{request_id}/intermediate'
-    fs = s3fs.S3FileSystem(anon=False)
-    shards = fs.ls(s3_path)
-
-    # Get info we need to initialize the output matrix
-    root = _open_zarr(shards[0])
-    data_dtype = root.data.dtype
-    data_ncols = root.data.shape[1]
-    qcs_dtype = root.qc_values.dtype
-    qcs_ncols = root.qc_values.shape[1]
-    gene_name = root.gene_name
-    qc_names = root.qc_names
-
-    def get_rows(s):
-        store = s3fs.S3Map(s)
-        root = zarr.group(store=store)
-        return root.data.shape[0]
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as exe:
-        total_rows = sum(exe.map(get_rows, shards))
-
-    dest_s3_path = f'{result_bucket}/{request_id}/{request_id}.zarr'
-    dest_root = _open_zarr(dest_s3_path, cache=False)
-    dest_root.create_dataset("gene_name", data=gene_name, chunks=gene_name.shape)
-    dest_root.create_dataset("qc_names", data=qc_names, chunks=qc_names.shape)
-    dest_root.create_dataset("cell_name", shape=(total_rows,), dtype="<U40")
-    dest_root.create_dataset("data", shape=(total_rows, data_ncols), dtype=data_dtype, chunks=(1000, data_ncols))
-    dest_root.create_dataset("qc_values", shape=(total_rows, qcs_ncols), dtype=qcs_dtype, chunks=(1000, qcs_ncols))
-    
-    cur_row = 0
-    
-    for shard in shards:
-        shard_root = _open_zarr(shard, cache=True)
-        shard_nrows = shard_root.data.shape[0]
-        last_row = cur_row + shard_nrows
-        dest_root.data[cur_row:last_row, :] = shard_root.data
-        dest_root.qc_values[cur_row:last_row, :] = shard_root.qc_values
-        dest_root.cell_name[cur_row:last_row] = shard_root.cell_name
-        cur_row = last_row
-
-
-# Record functions that handle different concerns for different formats here
-FORMAT_HANDLERS = {
-    "parquet_simple": {
-        "mapper": parquet_simple_mapper,
-        "work": parquet_simple_work,
-        "reducer": parquet_simple_reducer
-    },
-    "zarr_directory": {
-        "mapper": zarr_directory_mapper,
-        "work": zarr_directory_work,
-        "reducer": zarr_directory_reducer
-    }
-}
+    increment_state_field(event["request_id"], "CompletedReducerExecutions", 1)
+    record_timing_event(event["request_id"], "ReduceComplete")

@@ -23,14 +23,53 @@ Resources:
     Properties:
       TableName: !Join [ "-", [ !Ref "AWS::StackName", "state-table" ] ]
       AttributeDefinitions:
-        - AttributeName: request_id
+        - AttributeName: RequestId
           AttributeType: S
       KeySchema:
-        - AttributeName: request_id
+        - AttributeName: RequestId
           KeyType: HASH
       ProvisionedThroughput:
         ReadCapacityUnits: 25
         WriteCapacityUnits: 25
+  TimingTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Join [ "-", [ !Ref "AWS::StackName", "timing-table" ] ]
+      AttributeDefinitions:
+        - AttributeName: RequestId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: RequestId
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 3
+        WriteCapacityUnits: 3
+  ZarrLockTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Join [ "-", [ !Ref "AWS::StackName", "zarr-lock-table" ] ]
+      AttributeDefinitions:
+        - AttributeName: LockKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: LockKey
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 25
+        WriteCapacityUnits: 25
+  ZarrOutputTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Join [ "-", [ !Ref "AWS::StackName", "zarr-output-table" ] ]
+      AttributeDefinitions:
+        - AttributeName: RequestId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: RequestId
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 15
+        WriteCapacityUnits: 15
   # Give the lambda functions permissions they need
   LambdaRole:
     Type: AWS::IAM::Role
@@ -86,17 +125,43 @@ Resources:
               - !GetAtt MapperFunction.Arn
               - !GetAtt WorkFunction.Arn
               - !GetAtt ReducerFunction.Arn
-          # Update the state table
+          # Update the tables
           - Effect: Allow
             Action:
               - dynamodb:PutItem
               - dynamodb:GetItem
               - dynamodb:UpdateItem
+              - dynamodb:DeleteItem
             Resource:
               - !GetAtt StateTable.Arn
+              - !GetAtt ZarrLockTable.Arn
+              - !GetAtt ZarrOutputTable.Arn
+              - !GetAtt TimingTable.Arn
+          # Enable xray tracing
+          - Effect: Allow
+            Action:
+              - xray:PutTraceSegments
+              - xray:PutTelemetryRecords
+            Resource: "*"
+  XrayPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Join [ "-", [ !Ref "AWS::StackName", "xray-policy" ] ]
+      Roles:
+        - !Ref LambdaRole
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          # Enable xray tracing
+          - Effect: Allow
+            Action:
+              - xray:PutTraceSegments
+              - xray:PutTelemetryRecords
+            Resource: "*"
   # All the lambdas we use to orchestrate the filter and merge
   DriverFunction:
     Type: AWS::Lambda::Function
+    DependsOn: XrayPolicy
     Properties:
       Description: Receive request and return id
       Code:
@@ -107,13 +172,19 @@ Resources:
       Role: !GetAtt LambdaRole.Arn
       Runtime: "python3.6"
       Timeout: 29
+      TracingConfig:
+        Mode: Active
       Environment:
         Variables:
           STATE_TABLE: !Ref StateTable
           MAPPER_FN: !Ref MapperFunction
           RESULT_BUCKET: !Ref ResultBucket
+          ZARR_OUTPUT_TABLE: !Ref ZarrOutputTable
+          ZARR_LOCK_TABLE: !Ref ZarrLockTable
+          TIMING_TABLE: !Ref TimingTable
   MapperFunction:
     Type: AWS::Lambda::Function
+    DependsOn: XrayPolicy
     Properties:
       Description: Divide files into appropriately sized work chunks
       Code:
@@ -125,31 +196,43 @@ Resources:
       Runtime: "python3.6"
       MemorySize: 3008
       Timeout: 300
+      TracingConfig:
+        Mode: Active
       Environment:
         Variables:
           STATE_TABLE: !Ref StateTable
           WORK_FN: !Ref WorkFunction
           RESULT_BUCKET: !Ref ResultBucket
+          ZARR_OUTPUT_TABLE: !Ref ZarrOutputTable
+          ZARR_LOCK_TABLE: !Ref ZarrLockTable
+          TIMING_TABLE: !Ref TimingTable
   WorkFunction:
     Type: AWS::Lambda::Function
+    DependsOn: XrayPolicy
     Properties:
       Description: Perform filtering
       Code:
         S3Bucket: !Ref LambdaCodeBucket
         S3Key: !Ref LambdaCodeKey
       FunctionName: !Join [ "-", [ !Ref "AWS::StackName", "work" ] ]
-      Handler: matrix_map_reduce.do_work
+      Handler: matrix_map_reduce.work
       Role: !GetAtt LambdaRole.Arn
       Runtime: "python3.6"
       MemorySize: 3008
       Timeout: 300
+      TracingConfig:
+        Mode: Active
       Environment:
         Variables:
           STATE_TABLE: !Ref StateTable
           RESULT_BUCKET: !Ref ResultBucket
           REDUCER_FN: !Ref ReducerFunction
+          ZARR_OUTPUT_TABLE: !Ref ZarrOutputTable
+          ZARR_LOCK_TABLE: !Ref ZarrLockTable
+          TIMING_TABLE: !Ref TimingTable
   ReducerFunction:
     Type: AWS::Lambda::Function
+    DependsOn: XrayPolicy
     Properties:
       Description: Reduce results from work functions into single result
       Code:
@@ -161,7 +244,12 @@ Resources:
       Runtime: "python3.6"
       MemorySize: 3008
       Timeout: 300
+      TracingConfig:
+        Mode: Active
       Environment:
         Variables:
           STATE_TABLE: !Ref StateTable
           RESULT_BUCKET: !Ref ResultBucket
+          ZARR_OUTPUT_TABLE: !Ref ZarrOutputTable
+          ZARR_LOCK_TABLE: !Ref ZarrLockTable
+          TIMING_TABLE: !Ref TimingTable
