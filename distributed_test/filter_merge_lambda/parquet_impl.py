@@ -4,6 +4,7 @@ import uuid
 
 import fastparquet
 import pyarrow
+import pyarrow.parquet
 import s3fs
 
 PARQUET_ENV_VARS = {
