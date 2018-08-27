@@ -12,7 +12,7 @@ rm -f filter_merge_lambda.zip
 # extension from this PR: https://github.com/zarr-developers/numcodecs/pull/83
 #pip3 install --system -t filter_merge_lambda s3fs zarr pandas
 # This works for parquet only
-#pip3 install --system -t filter_merge_lambda pyarrow fastqparquet s3fs pandas
+#pip3 install --system -t filter_merge_lambda pyarrow fastparquet s3fs pandas
 cd filter_merge_lambda && zip -X -r ../filter_merge_lambda.zip * && cd ..
 $AWS s3 cp filter_merge_lambda.zip s3://"$2"/filter_merge_lambda.zip
 
