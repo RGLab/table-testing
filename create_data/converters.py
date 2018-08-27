@@ -2,12 +2,13 @@ import tempfile
 import os
 
 import anndata
-import fastparquet
 import h5py
 import h5sparse
 import loompy
 import numpy
 import pandas
+import pyarrow
+import pyarrow.parquet
 import scanpy.api as sc
 import scipy.io
 import scipy.sparse
@@ -112,14 +113,15 @@ def convert_to_loom(df):
                   {"gene_name": df.columns.values})
     return path
 
-def convert_to_parquet(df, row_group_offsets, compression, file_scheme):
+def convert_to_parquet(df, row_group_size, compression):
     """Convert a dataframe of expression values to a parquet file."""
 
     path = _get_temp_path(".parquet")
     qcs = fake_qc_values(NUM_QC_VALUES, df.index, seed=df.values.sum())
     full_df = pandas.concat([df, qcs], axis=1)
-    fastparquet.write(path, full_df, row_group_offsets=row_group_offsets,
-                      compression=compression, file_scheme=file_scheme)
+    table = pyarrow.Table.from_pandas(full_df)
+    pyarrow.parquet.write_table(table, path, row_group_size=row_group_size,
+                                compression=compression)
 
     return path
 

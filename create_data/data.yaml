@@ -76,5 +76,8 @@ outputs:
     format: loom
   feather:
     format: feather
-  parquet:
+  parquet_5000_brotli:
     format: parquet
+    args:
+      row_group_size: 5000
+      compression: BROTLI
