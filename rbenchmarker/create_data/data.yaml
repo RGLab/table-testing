@@ -1,0 +1,17 @@
+# Where to get the source data.
+# Each element has a url and a type. The type tells us what function to use to
+# convert the source data into a common data structure. The args optionally
+# tell us some arguments to pass to that function.
+sources:
+  tenx_mouse_neuron_20k:
+    path: /src/hdf5_1000_1000_chunks_3_compression.h5 
+    type: h5
+    multiple_matrices: false
+    args:
+      dataset_name: data
+# What formats to convert the source data into.
+outputs:
+  ff:
+    format: ff
+  bigmemory:
+    format: bigmemory

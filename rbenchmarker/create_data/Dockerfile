@@ -4,8 +4,8 @@ RUN R -e 'BiocManager::install(c("devtools","HDF5Array", "bigmemoryExtras", "opt
            ;devtools::install_github("RGLab/mbenchmark")\
             '
 
-COPY convert.R /scripts/convert.R
-COPY converters.R /scripts/converters.R
+COPY convert.R /convert.R
+COPY converters.R /converters.R
 
 
-ENTRYPOINT ["/scripts/convert.R"]
+ENTRYPOINT ["/convert.R"]
