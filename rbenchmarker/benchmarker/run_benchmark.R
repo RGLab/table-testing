@@ -35,9 +35,9 @@ load_data <- function(yaml_path, verbose = FALSE){
               if(!existsFunction(thisCall)) {
                 stop("delayed array loader function: '", thisCall, "' not found!")
               } else {
-                message("delayed array loader function: '", thisCall, "' ...")
+                # message("delayed array loader function: '", thisCall, "' ...")
 
-                do.call(thisCall, list(dat$path, dat[["dataset_name"]], verbose))
+                do.call(thisCall, list(dat$path, dat[["args"]][["dataset_name"]], verbose))
               }
 
             }, simplify = FALSE)
@@ -49,14 +49,14 @@ load_data <- function(yaml_path, verbose = FALSE){
 #               help="Show this help message and exit"))
 option_list <- list(
   make_option(c("-v", "--verbose"), action="store_true", default=TRUE,help="Print extra output [default %default]"),
-  make_option("--test_yaml",help="the yaml file describe the test data"),
+  make_option("--test-yaml",help="the yaml file describe the test data"),
   make_option("--task", default= "subsetting"
                       ,help="the task to run, currently supported tasks: 'subsetting','traversing'. [default \'%default\']"),
 
   make_option("--times"
               , default= 5
               , help = "The repetitions to run [default %default]"),
-  make_option("--max_rows"
+  make_option("--max-percent-of-rows"
               , default= 0.1
               , help="(only applicable for 'subsetting' task) It is the percentage of the total number of rows of the data. used to set the upper bound of size of region to select.[default %default]"
                 ),
@@ -64,35 +64,37 @@ option_list <- list(
               ),
  make_option("--shapes", default= "0.5, 1, 2", help="(only applicable for 'subsetting' task) vectors of col:row ratio, which defines the shape of the selected region [default \"%default\"]"
                                              ),
- make_option("--drop_page_cache", action="store_true", default=TRUE,help="whether to drop the page cache between iterations [default %default]"),
- make_option("--output_path",help="the path used for storing results")
+ make_option("--drop-page-cache", action="store_true", default=FALSE,help="whether to drop the page cache between iterations [default %default]"),
+ make_option("--output-path",help="the path used for storing results")
 
 )
 
 # get command line options, if help option encountered print help and exit,
 # otherwise if options not found on command line then set defaults,
 opt <- parse_args(OptionParser(option_list=option_list))
-
-if(is.null(opt$test_yaml))
-  stop("Missing argument --test_yaml")
-if(is.null(opt$output_path))
-  stop("Missing argument --output_path")
-
-mat.lists <- load_data(opt$test_yaml, opt$verbose)
+yamlfile <- opt[["test-yaml"]]
+if(is.null(yamlfile))
+  stop("Missing argument --test-yaml")
+output <- opt[["output-path"]]
+if(is.null(output))
+  stop("Missing argument --output-path")
+shapes <- as.numeric(strsplit(split = ",", opt$shapes)[[1]])
+# message(shapes)
+mat.lists <- load_data(yamlfile, opt$verbose)
 for(src in names(mat.lists))
 {
 
-  suppressWarnings(res <- mbenchmark(mat.list[[src]]
+  suppressWarnings(res <- mbenchmark(mat.lists[[src]]
                                   , type = opt$task
                                   , times = opt$times
-                                  , ubound = opt$ubound
+                                  , ubound = opt[["max-percent-of-rows"]]
                                   , nsubset = opt$nsubset
-                                  , shape = as.integer(strsplit(split = ",", opt$shapes)[[1]])
+                                  , shape = shapes
                                   , trace_mem = TRUE
-                                  , clear_page_cache = opt$drop_page_cache
-                                  , cache.file = file.path(opt$output_path, paste0(src, "_", opt$task, ".csv"))
+                                  , clear_page_cache = opt[["drop-page-cache"]]
+                                  , cache.file = file.path(output, paste0(src, "_", opt$task, ".csv"))
                                   , verbose = opt$verbose))
-   png(file.path(opt$output_path, paste0(src, "_", opt$task, ".png")))
+   png(file.path(output,  paste0(src, "_", opt$task, ".png")))
    p <-autoplot(res)
     if(opt$task == "subsetting")
       p <- p + scale_y_log10()

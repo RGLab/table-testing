@@ -6,18 +6,13 @@
 sources:
   tenx_mouse_neuron_20k:
     h5_1k_1k:
-      path: /data/gz_1k_1k_sub.h5
+      path: /data/hdf5_1000_1000_chunks_3_compression.h5
       format: h5
       args:
         dataset_name: data
-    h5_chunk_by_gene:
-      path: /data/gz_chunk_by_gene_sub.h5
-      format: h5
-      args:
-       dataset_name: data
     ff:
-      path: /data/fm_folder
+      path: /data/fm
       format: ff
     bigmemory:
-      path: /data/bm.desc
+      path: /data/bm
       format: bigmemory

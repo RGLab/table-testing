@@ -16,11 +16,11 @@ h5_to_delayedarray <- function(path, dataset_name = "data", verbose = FALSE){
 }
 
 bigmemory_to_delayedarray <- function(path, dataset_name = NULL, verbose = FALSE){
-  bm <- attach.big.matrix(path)
+  bm <- attach.big.matrix(file.path(path, "bm.desc"))
   bmseed <- BMArraySeed(bm)
   
   bm <- DelayedArray(bmseed)
-  dims <- dim(hm)
+  dims <- dim(bm)
   if(verbose)
     message("BMArray: ", paste(dims, collapse = "x"))
   bm
@@ -31,7 +31,7 @@ ff_to_delayedarray <- function(path, dataset_name = NULL, verbose = FALSE){
   fm <- ff(vmode=meta$vmode, dim=as.integer(strsplit(split = ",", meta$dim)[[1]]), filename = meta$ff.file)
   
   fm <- DelayedArray(fm)
-  dims <- dim(hm)
+  dims <- dim(fm)
   if(verbose)
     message("FMArray: ", paste(dims, collapse = "x"))
   fm
