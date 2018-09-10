@@ -98,6 +98,7 @@ for(src in names(mat.lists))
    p <-autoplot(res)
     if(opt$task == "subsetting")
       p <- p + scale_y_log10()
+   print(p)
   dev.off()
   # plot_mem(res, units = "Kb") + scale_y_log10()
 
