@@ -40,7 +40,7 @@ h5_to_ff <- function(h5file, dataset_name = "data", output_path, nblocks = 100, 
     message("source data dimension: ", paste(dims, collapse = "x"))
   
   fmfolder <- file.path(output_path, "fm")
-  message(fmfolder)
+  # message(fmfolder)
   dir.create(fmfolder)
   ff.file <- file.path(fmfolder, "fm.bin")
   fm <- ff(vmode="double", dim=dims, filename = ff.file)
@@ -58,7 +58,7 @@ h5_to_ff <- function(h5file, dataset_name = "data", output_path, nblocks = 100, 
   if(!all.equal(as.matrix(hm[,1:3]), as.matrix(fm[,1:3])))
     stop("The destination data value'", output_path, "' is not consistent with the source data '", h5file, "'")
   
-  write.csv(data.frame(vmode = vmode(fm), ff.file = filename(fm), dim = paste(dim(fm), collapse = ","))
+  write.csv(data.frame(vmode = vmode(fm), ff.file = basename(filename(fm)), dim = paste(dim(fm), collapse = ","))
                        , file = file.path(fmfolder, "fm_meta.csv"))
   
 }

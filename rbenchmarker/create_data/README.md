@@ -8,13 +8,13 @@ docker build -t data_converter_r .
 docker run data_converter_r -h
 #convert the data format
 docker run -v /path/to/input_file:/data -v /path/to/output:/output data_converter_r \
-                --data-yaml=/data/data.yaml --output-path=/output 
+                --data-path=/data --output-path=/output --verbose
 ```
 
 The image has an entrypoint that expects the following arguments(Note that no spaces are allowed at both sides of = when specifying the arguments):
-- --data-yaml: The path, within the docker container, to the `data.yaml` file that defines the sources and formats to create.
+- --data-path: The root path, within the docker container, to the source data. It also expects a `data.yaml` file that defines the sources and formats to create.
 - --output-path: The path, again within the docker container, where the output expression matrices should be written.
-
+- --verbose: Print extra output.
 
 The command above assumes the source data file exists at `/path/to/input_file`, and it will place the created matrices in subdirectories of `/path/to/output`.
 

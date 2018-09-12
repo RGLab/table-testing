@@ -7,22 +7,21 @@ docker build -t benchmarker_r .
 #Print the helps for the supported arguments
 docker run benchmarker_r -h
 #run the benchmarker leaving most arguments as default
-docker run -v /path/to/output:/output benchmarker_r \
-          -v /path/to/test.yaml:/test.yaml \
----test-yaml=/test.yaml \
---output-path=/output 
+docker run -v /path/to/data:/data -v /path/to/output:/output benchmarker_r  \
+             --data-path=/data --output-path=/output - --max-percent-of-rows=0.01 --verbose
 ```
 
-The image has an entrypoint that expects these major arguments:
+The image has an entrypoint that expects two major arguments:
 
-- --test-yaml: The path, within the docker container, to the `test.yaml` file that defines the sources data to test.
+- --data-path: The path, within the docker container, to the sources data to test. It also expects the `test.yaml` file that defines the details of test data.
 - --output-path: The path, again within the docker container, where the benchmark output should be written.
 - --max-percent-of-rows:  the percentage of the total number of rows of the data. It is used to set the upper bound of size of region to select. Default is 0.1. To get a quick test run, set it to the smaller size (e.g. 0.001)
+- --verbose: Print extra output.
 
 There are other optional arguments can be used to have the finer control on how and what task to be run.
 type `-h` for details.
 
-The command above assumes the `test.yaml` file exists at `/path/to/test.yaml`, and it will place all of the results in subdirectories of `/path/to/output`.
+The command above assumes the data and `test.yaml` file exists in `/path/to/data`, and it will place all of the results in subdirectories of `/path/to/output`.
 
 - the timing details are stored in csv file 
 

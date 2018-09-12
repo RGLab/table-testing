@@ -24,9 +24,8 @@ source("converters.R")
 # make_option(c("-h", "--help"), action="store_true", default=FALSE,
 #               help="Show this help message and exit"))
 option_list <- list(
-  make_option(c("-v", "--verbose"), action="store_true", default=TRUE,help="Print extra output [default \"%default\"]"),
-  make_option(c("-q", "--quietly"), action="store_false",dest="verbose", help="Print little output"),
-  make_option("--data-yaml",help="the yaml file describe the test data"),
+  make_option(c("-v", "--verbose"), action="store_true", default=FALSE,help="Print extra output [default \"%default\"]"),
+  make_option("--data-path",help="the path to the source data"),
   make_option("--output-path",help="the destination data file path"),
   make_option("--nblocks", default= 100, help = "the unit size of block processing [default \"%default\"]")
 
@@ -38,9 +37,11 @@ opt <- parse_args(OptionParser(option_list=option_list))
 output <- opt[["output-path"]]
 if(is.null(output))
   stop("Missing argument --output-path")
+datapath <- opt[["data-path"]]
+if(is.null(output))
+  stop("Missing argument --data-path")
 
-
-data.list <- read_yaml(opt[["data-yaml"]])
+data.list <- read_yaml(file.path(datapath, "data.yaml"))
 src.list <- data.list[["sources"]]
 dest.list <- data.list[["outputs"]]
 for(src in names(src.list))
@@ -56,7 +57,7 @@ for(src in names(src.list))
       stop("converter function: '", thisCall, "' not found!")
     } else {
 
-      do.call(thisCall, list(src[["path"]]
+      do.call(thisCall, list(file.path(datapath, src[["path"]])
                              , dataset_name = src[["args"]][["dataset_name"]]
                              , output_path = output
                              , opt$nblocks, opt$verbose))

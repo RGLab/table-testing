@@ -4,7 +4,7 @@
 # tell us some arguments to pass to that function.
 sources:
   tenx_mouse_neuron_20k:
-    path: /src/hdf5_1000_1000_chunks_3_compression.h5 
+    path: hdf5_1000_1000_chunks_3_compression.h5 
     type: h5
     multiple_matrices: false
     args:

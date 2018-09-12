@@ -27,8 +27,8 @@ source("file_to_delayedarray.R")
 
 #' load the different matrix format into a list of DelayedArray objects
 #' @param yaml_path the path to a yaml file that describes the data path and format
-load_data <- function(yaml_path, verbose = FALSE){
-  data.src <- read_yaml(yaml_path)[[1]]
+load_data <- function(datapath, verbose = FALSE){
+  data.src <- read_yaml(file.path(datapath, "test.yaml"))[["sources"]]
   sapply(data.src, function(src){
         sapply(src, function(dat){
               thisCall <- paste0(dat$format, "_to_delayedarray")
@@ -37,7 +37,7 @@ load_data <- function(yaml_path, verbose = FALSE){
               } else {
                 # message("delayed array loader function: '", thisCall, "' ...")
 
-                do.call(thisCall, list(dat$path, dat[["args"]][["dataset_name"]], verbose))
+                do.call(thisCall, list(file.path(datapath, dat$path), dat[["args"]][["dataset_name"]], verbose))
               }
 
             }, simplify = FALSE)
@@ -48,8 +48,8 @@ load_data <- function(yaml_path, verbose = FALSE){
 # make_option(c("-h", "--help"), action="store_true", default=FALSE,
 #               help="Show this help message and exit"))
 option_list <- list(
-  make_option(c("-v", "--verbose"), action="store_true", default=TRUE,help="Print extra output [default %default]"),
-  make_option("--test-yaml",help="the yaml file describe the test data"),
+  make_option(c("-v", "--verbose"), action="store_true", default=FALSE,help="Print extra output [default %default]"),
+  make_option("--data-path",help="the root path to the test data"),
   make_option("--task", default= "subsetting"
                       ,help="the task to run, currently supported tasks: 'subsetting','traversing'. [default \'%default\']"),
 
@@ -72,15 +72,15 @@ option_list <- list(
 # get command line options, if help option encountered print help and exit,
 # otherwise if options not found on command line then set defaults,
 opt <- parse_args(OptionParser(option_list=option_list))
-yamlfile <- opt[["test-yaml"]]
-if(is.null(yamlfile))
-  stop("Missing argument --test-yaml")
+datapath <- opt[["data-path"]]
+if(is.null(datapath))
+  stop("Missing argument --data-path")
 output <- opt[["output-path"]]
 if(is.null(output))
   stop("Missing argument --output-path")
 shapes <- as.numeric(strsplit(split = ",", opt$shapes)[[1]])
 # message(shapes)
-mat.lists <- load_data(yamlfile, opt$verbose)
+mat.lists <- load_data(datapath, opt$verbose)
 for(src in names(mat.lists))
 {
 

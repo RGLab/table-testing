@@ -28,7 +28,7 @@ bigmemory_to_delayedarray <- function(path, dataset_name = NULL, verbose = FALSE
 
 ff_to_delayedarray <- function(path, dataset_name = NULL, verbose = FALSE){
   meta <- read.csv(file.path(path, "fm_meta.csv"), stringsAsFactors = FALSE)
-  fm <- ff(vmode=meta$vmode, dim=as.integer(strsplit(split = ",", meta$dim)[[1]]), filename = meta$ff.file)
+  fm <- ff(vmode=meta$vmode, dim=as.integer(strsplit(split = ",", meta$dim)[[1]]), filename = file.path(path, meta$ff.file))
   
   fm <- DelayedArray(fm)
   dims <- dim(fm)
