@@ -1,4 +1,4 @@
-FROM bioconductor/devel_core2
+FROM bioconductor/devel_core2:latest
 
 RUN R -e 'BiocManager::install(c("devtools","HDF5Array", "bigmemoryExtras", "optparse", "ff"))\
            ;devtools::install_github("RGLab/mbenchmark")\
