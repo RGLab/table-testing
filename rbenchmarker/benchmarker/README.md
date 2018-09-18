@@ -63,7 +63,7 @@ type `-h` for details.
 
 The data sources are defined in the `sources` section of [test.yaml](test.yaml). Each object has the following keys:
 
-- url: The local path where the source data can be loaded
+- path: The local path where the source data can be loaded
 - format: The type of the source data. There has to be a function called `{format}_to_delayedarray` in [file_to_delayedarray.R](file_to_delayedarray.R) that can convert the source data into a DelayedArray data structure
 - args: Any additional keyword arguments to pass to the `{format}_to_delayedarray` function
 

@@ -6,7 +6,7 @@
 sources:
   tenx_mouse_neuron_20k:
     h5_1k_1k:
-      path: hdf5_1000_1000_chunks_3_compression.h5
+      path: hdf5_1000_1000_chunks_3_compression.h5 #downloaded from s3://matrix-format-test-data/matrices/hdf5_10000_10000_chunks_3_compression/tenx_mouse_neuron_20k/hdf5_10000_10000_chunks_3_compression_tenx_mouse_neuron_20k.h5
       format: h5
       args:
         dataset_name: data
